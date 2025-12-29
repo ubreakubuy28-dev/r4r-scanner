@@ -126,3 +126,42 @@ def fetch_reddit_data():
         r = requests.get(url, params=params, headers=headers, timeout=10)
         if r.status_code == 200:
             return r.json()['data']['children']
+        elif r.status_code == 429:
+            st.error("❌ Too Many Requests. Reddit is rate-limiting this server.")
+        elif r.status_code == 403:
+            st.error("❌ Forbidden. Reddit blocked this IP.")
+        else:
+            st.error(f"❌ Error {r.status_code}")
+    except Exception as e:
+        st.error(f"Connection Failed: {e}")
+    return []
+
+# ==========================================
+# 3. MAIN UI
+# ==========================================
+st.title("🕵️ R4R Stealth Scanner")
+
+if st.button("🚀 Scan Now"):
+    with st.spinner("Connecting to Reddit..."):
+        posts = fetch_reddit_data()
+        
+        if posts:
+            count = 0
+            for child in posts:
+                post = parse_post(child)
+                if passes_filters(post):
+                    count += 1
+                    chat_link, draft, _ = generate_reply_data(post)
+                    
+                    with st.expander(f"[{post['tag']}] {post['age']} | {post['title']}"):
+                        st.write(post['preview'] + "...")
+                        st.markdown(f"[🔗 View Post]({post['url']})")
+                        st.text_area("Draft", draft, height=100)
+                        st.markdown(f"""<a href="{chat_link}" target="_blank"><button style="background-color:#FF4500;color:white;border:none;padding:8px;border-radius:4px;">Chat</button></a>""", unsafe_allow_html=True)
+            
+            if count > 0:
+                st.success(f"Found {count} matches!")
+            else:
+                st.warning("Data received, but your filters hid everything. Try unchecking 'Must Have'.")
+        else:
+            st.warning("No data returned. If you see an error above, Reddit has blocked the cloud server.")
