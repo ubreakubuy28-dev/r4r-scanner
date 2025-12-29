@@ -54,9 +54,10 @@ block_socials = st.sidebar.checkbox("Block Social Spam (Insta, Snap)", value=Fal
 block_crypto  = st.sidebar.checkbox("Block Crypto/Telegram Spam", value=True)
 
 # Define preset lists
-SELLER_TERMS = ["onlyfans", "fansly", "content", "selling", "promo", "sub", "sale", "menu"]
+SELLER_TERMS = ["onlyfans", "fansly", "selling", "promo", "prices", "cashapp", "paypal"]
 SOCIAL_TERMS = ["instagram", "insta", "ig", "snapchat", "snap", "add me"]
 CRYPTO_TERMS = ["crypto", "bitcoin", "telegram", "whatsapp", "invest"]
+
 
 def parse_entry(entry):
     """Extracts info from an RSS entry."""
@@ -88,22 +89,34 @@ def passes_filters(post):
     if post['tag'] not in target_genders: return False
     if not (min_age <= post['age'] <= max_age): return False
     
+    # Normalize text
     text = post['full_text']
+    
+    # Helper for Whole Word Matching (prevents "sub" matching "subject")
+    def contains_word(text, word_list):
+        # Adds spaces around text to ensure we match " sale " not "wholesale"
+        # A simple regex is better but this is faster/easier
+        clean_text = " " + re.sub(r'[^\w\s]', '', text) + " "
+        for word in word_list:
+            if f" {word} " in clean_text:
+                return True
+        return False
 
     # 2. Exclude Filter (Custom)
     if enable_exclude:
-        if any(bad_word in text for bad_word in exclude_keywords):
+        if contains_word(text, exclude_keywords):
             return False
 
     # 3. Include Filter (Custom)
     if enable_include:
-        if not any(good_word in text for good_word in include_keywords):
+        if not contains_word(text, include_keywords):
             return False
 
     # 4. Quick Blockers (Presets)
-    if block_sellers and any(x in text for x in SELLER_TERMS): return False
-    if block_socials and any(x in text for x in SOCIAL_TERMS): return False
-    if block_crypto and any(x in text for x in CRYPTO_TERMS): return False
+    # We use contains_word now so "sub" doesn't block "subject"
+    if block_sellers and contains_word(text, SELLER_TERMS): return False
+    if block_socials and contains_word(text, SOCIAL_TERMS): return False
+    if block_crypto and contains_word(text, CRYPTO_TERMS): return False
 
     return True
 
@@ -160,3 +173,4 @@ with tab2:
                 count += 1
         if count == 0:
             st.warning("No new matching posts found right now.")
+
