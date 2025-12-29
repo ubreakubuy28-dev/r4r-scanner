@@ -11,40 +11,45 @@ st.set_page_config(page_title="R4R Stealth Scanner", layout="wide")
 
 st.sidebar.title("⚙️ Scanner Settings")
 
-# --- DEMOGRAPHICS ---
+# --- SECTION A: DEMOGRAPHICS ---
 st.sidebar.header("1. Target")
 target_genders = st.sidebar.multiselect("Gender Tags", ['F4M', 'F4R', 'F4F', 'M4F'], default=['F4M'])
 min_age, max_age = st.sidebar.slider("Age Range", 18, 99, (21, 35))
 
-# --- FILTERS ---
-st.sidebar.header("2. Filtering")
+# --- SECTION B: CONTENT FILTERS ---
+st.sidebar.header("2. Filtering Rules")
+
 enable_exclude = st.sidebar.checkbox("⛔ Enable Block List", value=True)
-exclude_text = st.sidebar.text_area("Block words", "smoke, 420, poly, married, couple, trans", height=60)
+exclude_text = st.sidebar.text_area("Block words (comma separated)", "smoke, 420, poly, married, couple, trans", height=60)
 exclude_keywords = [k.strip().lower() for k in exclude_text.split(",") if k.strip()]
 
 enable_include = st.sidebar.checkbox("✅ Enable 'Must Have'", value=False)
-include_text = st.sidebar.text_area("Must contain", "local, nyc, gamer, nurse, gym", height=60)
+include_text = st.sidebar.text_area("Must contain (comma separated)", "local, nyc, gamer, nurse, gym", height=60)
 include_keywords = [k.strip().lower() for k in include_text.split(",") if k.strip()]
 
-block_sellers = st.sidebar.checkbox("Block Sellers", value=True)
-block_crypto  = st.sidebar.checkbox("Block Crypto", value=True)
+# Quick Blockers
+st.sidebar.subheader("⚡ Quick Blocks")
+block_sellers = st.sidebar.checkbox("Block Sellers (OF/Fansly)", value=True)
+block_crypto  = st.sidebar.checkbox("Block Crypto/Spam", value=True)
 
 SELLER_TERMS = ["onlyfans", "fansly", "selling", "promo", "prices", "cashapp", "paypal", "menu"]
 CRYPTO_TERMS = ["crypto", "bitcoin", "telegram", "whatsapp", "invest"]
 
-# --- PERSONA ---
+# --- SECTION C: YOUR PERSONA ---
 st.sidebar.header("3. Reply Assistant")
-my_interests = st.sidebar.text_area("Your Hobbies", "tennis and video games")
-my_name = st.sidebar.text_input("Sign-off Name", "Me")
+my_interests = st.sidebar.text_area("Your Hobbies (for drafts)", "tennis and video games")
+my_name = st.sidebar.text_input("Your Sign-off Name", "Me")
 
 # ==========================================
-# 2. CORE FUNCTIONS
+# 2. HELPER FUNCTIONS
 # ==========================================
 
 def contains_word(text, word_list):
+    """Checks for whole words to avoid false positives."""
     clean_text = " " + re.sub(r'[^\w\s]', '', text).lower() + " "
     for word in word_list:
-        if f" {word} " in clean_text: return True
+        if f" {word} " in clean_text:
+            return True
     return False
 
 def generate_reply_data(post):
@@ -59,6 +64,7 @@ def generate_reply_data(post):
     else:
         draft = f"Hi! Read your post about '{post['title'][:30]}...' and thought you sounded cool. I'm mainly into {my_interests} but down to chat about whatever. -{my_name}"
     
+    # Reddit Chat URL
     return f"https://www.reddit.com/chat/u/{author}", draft
 
 def parse_post(child):
@@ -66,7 +72,6 @@ def parse_post(child):
     title = data.get('title', '')
     selftext = data.get('selftext', '')
     
-    # Regex for Age/Tag
     pattern = r"(\d{2})\s*[\[\(]([Ff]4[MmRrFf])[\]\)]"
     match = re.search(pattern, title)
     age = int(match.group(1)) if match else None
@@ -84,10 +89,10 @@ def parse_post(child):
     }
 
 def passes_filters(post):
-    if not post['age']: return False # Skip if we couldn't parse age
+    if not post['age']: return False
     if not (min_age <= post['age'] <= max_age): return False
     
-    # Note: Gender is handled by the search query, but double check here
+    # Check Gender (Redundant with search query but good safety)
     if target_genders and post['tag'] not in target_genders: return False
 
     text = post['full_text']
@@ -109,14 +114,13 @@ def fetch_reddit_data():
         'q': q,
         'sort': 'new',
         'restrict_sr': 'on',
-        'limit': '50' # Grab 50 posts to ensure we get data
+        'limit': '50'
     }
     
     # 2. Fake Browser Headers (Crucial)
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
         'Referer': 'https://www.google.com/'
     }
     
@@ -132,8 +136,10 @@ def fetch_reddit_data():
             st.error("❌ Forbidden. Reddit blocked this IP.")
         else:
             st.error(f"❌ Error {r.status_code}")
+            
     except Exception as e:
         st.error(f"Connection Failed: {e}")
+        
     return []
 
 # ==========================================
@@ -141,27 +147,37 @@ def fetch_reddit_data():
 # ==========================================
 st.title("🕵️ R4R Stealth Scanner")
 
-if st.button("🚀 Scan Now"):
-    with st.spinner("Connecting to Reddit..."):
-        posts = fetch_reddit_data()
-        
-        if posts:
-            count = 0
-            for child in posts:
-                post = parse_post(child)
-                if passes_filters(post):
-                    count += 1
-                    chat_link, draft, _ = generate_reply_data(post)
-                    
-                    with st.expander(f"[{post['tag']}] {post['age']} | {post['title']}"):
-                        st.write(post['preview'] + "...")
-                        st.markdown(f"[🔗 View Post]({post['url']})")
-                        st.text_area("Draft", draft, height=100)
-                        st.markdown(f"""<a href="{chat_link}" target="_blank"><button style="background-color:#FF4500;color:white;border:none;padding:8px;border-radius:4px;">Chat</button></a>""", unsafe_allow_html=True)
+tab1, tab2 = st.tabs(["🚀 Live Scanner", "ℹ️ Help"])
+
+with tab1:
+    if st.button("Scan Now"):
+        with st.spinner("Connecting to Reddit..."):
+            posts = fetch_reddit_data()
             
-            if count > 0:
-                st.success(f"Found {count} matches!")
+            if posts:
+                count = 0
+                for child in posts:
+                    post = parse_post(child)
+                    if passes_filters(post):
+                        count += 1
+                        chat_link, draft = generate_reply_data(post)
+                        
+                        with st.expander(f"[{post['tag']}] {post['age']} | {post['title']}"):
+                            col1, col2 = st.columns([2, 1])
+                            with col1:
+                                st.write(post['preview'] + "...")
+                                st.markdown(f"[🔗 View Post]({post['url']})")
+                            with col2:
+                                st.text_area("Draft", draft, height=100, key=post['url'])
+                                st.markdown(f"""<a href="{chat_link}" target="_blank"><button style="background-color:#FF4500;color:white;border:none;padding:10px;border-radius:4px;width:100%;">💬 Chat</button></a>""", unsafe_allow_html=True)
+                
+                if count > 0:
+                    st.success(f"Found {count} matches!")
+                else:
+                    st.warning("Data received, but your filters hid everything. Try unchecking 'Must Have'.")
             else:
-                st.warning("Data received, but your filters hid everything. Try unchecking 'Must Have'.")
-        else:
-            st.warning("No data returned. If you see an error above, Reddit has blocked the cloud server.")
+                # If posts is empty, the error was likely printed in the try/except block above
+                pass
+
+with tab2:
+    st.write("If you get a 429/403 error, run this script locally on your PC using 'streamlit run app.py'")
