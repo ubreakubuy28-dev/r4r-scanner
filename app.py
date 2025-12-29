@@ -1,53 +1,45 @@
 import streamlit as st
-import requests
+import feedparser
 import re
 import pandas as pd
 from datetime import datetime
 import time
 
 # ==========================================
-# 1. SETUP & CONFIG
+# 1. SETUP
 # ==========================================
-st.set_page_config(page_title="R4R Partner Finder (No-Login)", layout="wide")
-
-# Custom headers are REQUIRED so Reddit doesn't block the script
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-}
+st.set_page_config(page_title="R4R RSS Scanner", layout="wide")
 
 # ==========================================
 # 2. FILTERING LOGIC
 # ==========================================
 st.sidebar.header("Search Filters")
 
-# Gender Filter
 target_genders = st.sidebar.multiselect(
     "Target Gender Tags",
     ['F4M', 'F4R', 'F4F', 'M4F', 'M4R', 'M4M'],
     default=['F4M']
 )
 
-# Age Filter
 min_age, max_age = st.sidebar.slider("Age Range", 18, 99, (21, 35))
 
-# Keyword Filter
 st.sidebar.subheader("Keyword/Ethnicity Filter")
 enable_keyword_filter = st.sidebar.checkbox("Enable Keyword Filter")
 keywords_input = st.sidebar.text_area(
-    "Keywords (comma separated)", 
+    "Keywords", 
     "asian, latina, white, black, korean, japanese, hispanic, colombian, filipina",
     height=100
 )
 keywords = [k.strip().lower() for k in keywords_input.split(",") if k.strip()]
 
-def parse_post_data(post_data):
-    """Extracts relevant info from raw JSON data."""
-    title = post_data.get('title', '')
-    selftext = post_data.get('selftext', '')
-    url = post_data.get('url', '')
-    created_utc = post_data.get('created_utc', 0)
+def parse_entry(entry):
+    """Extracts info from an RSS entry."""
+    title = entry.title
+    # RSS content is HTML, we strip it simply for checking
+    content = entry.content[0].value if 'content' in entry else ""
+    link = entry.link
     
-    # Pattern covers: 24 [F4M], (24) [f4m], [f4m] 24
+    # Pattern: 24 [F4M]
     pattern = r"(\d{2})\s*[\[\(]([Ff]4[MmRrFf])[\]\)]"
     match = re.search(pattern, title)
     
@@ -56,119 +48,71 @@ def parse_post_data(post_data):
     
     return {
         "title": title,
-        "selftext": selftext,
-        "url": url,
-        "created_utc": created_utc,
+        "content": content,
+        "link": link,
+        "published": entry.published,
         "age": age,
         "tag": tag,
-        "id": post_data.get('id')
+        "id": entry.id
     }
 
 def passes_filters(post):
-    if not post['age'] or not post['tag']:
-        return False
-    
-    if post['tag'] not in target_genders:
-        return False
-        
-    if not (min_age <= post['age'] <= max_age):
-        return False
+    if not post['age'] or not post['tag']: return False
+    if post['tag'] not in target_genders: return False
+    if not (min_age <= post['age'] <= max_age): return False
     
     if enable_keyword_filter:
-        full_text = (post['title'] + " " + post['selftext']).lower()
+        full_text = (post['title'] + " " + post['content']).lower()
         if not any(k in full_text for k in keywords):
             return False
-            
     return True
 
-def fetch_reddit_json(sort="new", limit=25):
-    """Fetches public JSON data from Reddit without API keys."""
-    url = f"https://www.reddit.com/r/r4r/{sort}.json?limit={limit}"
-    try:
-        response = requests.get(url, headers=HEADERS)
-        if response.status_code == 200:
-            data = response.json()
-            return data['data']['children'] # This is the list of posts
-        elif response.status_code == 429:
-            st.error("Rate limit hit! Reddit is asking us to slow down. Wait a moment.")
-            return []
-        else:
-            st.error(f"Error fetching data: {response.status_code}")
-            return []
-    except Exception as e:
-        st.error(f"Connection error: {e}")
-        return []
+def fetch_rss():
+    # We use the RSS feed which is often less blocked than JSON
+    url = "https://www.reddit.com/r/r4r/new.rss"
+    # User-Agent is critical
+    feed = feedparser.parse(url, agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+    return feed.entries
 
 # ==========================================
-# 3. MAIN APP INTERFACE
+# 3. MAIN UI
 # ==========================================
-st.title("❤️ R4R Intelligent Scanner (No-API Version)")
+st.title("❤️ R4R RSS Scanner (Cloud Fix)")
 
-tab1, tab2 = st.tabs(["🔍 Search Recent", "⚡ Live Scanner"])
+tab1, tab2 = st.tabs(["🔍 Recent Posts", "⚡ Auto-Scan"])
 
-# --- TAB 1: HISTORICAL SEARCH ---
 with tab1:
-    st.write("Scan the most recent posts.")
-    if st.button("Scan Now"):
-        with st.spinner("Fetching public data..."):
-            raw_posts = fetch_reddit_json(sort="new", limit=100)
+    if st.button("Scan RSS Feed"):
+        with st.spinner("Fetching RSS feed..."):
+            entries = fetch_rss()
             results = []
             
-            for entry in raw_posts:
-                post = parse_post_data(entry['data'])
+            if not entries:
+                st.error("Could not fetch data. Reddit might still be blocking this IP.")
+            
+            for entry in entries:
+                post = parse_entry(entry)
                 if passes_filters(post):
-                    results.append({
-                        "Posted": datetime.fromtimestamp(post['created_utc']).strftime('%Y-%m-%d %H:%M'),
-                        "Tag": post['tag'],
-                        "Age": post['age'],
-                        "Title": post['title'],
-                        "Link": post['url'],
-                        "Preview": post['selftext'][:200]
-                    })
+                    results.append(post)
             
             if results:
                 st.success(f"Found {len(results)} matches!")
                 for row in results:
-                    with st.expander(f"[{row['Tag']}] {row['Age']} - {row['Title']}"):
-                        st.write(f"**Posted:** {row['Posted']}")
-                        st.write(row["Preview"] + "...")
-                        st.markdown(f"[View Post on Reddit]({row['Link']})")
+                    with st.expander(f"[{row['tag']}] {row['age']} - {row['title']}"):
+                        st.write(f"**Posted:** {row['published']}")
+                        st.markdown(f"[View Post]({row['link']})")
             else:
-                st.info("No matches found in the last 100 posts.")
+                st.info("No matches in the current RSS feed.")
 
-# --- TAB 2: LIVE SCANNER ---
 with tab2:
-    st.write("This will check the 'New' feed.")
-    
-    if 'live_data' not in st.session_state:
-        st.session_state.live_data = []
-
-    if st.button("Check for New Posts"):
-        raw_posts = fetch_reddit_json(sort="new", limit=10)
-        found_new = 0
-        
-        for entry in raw_posts:
-            post = parse_post_data(entry['data'])
-            
-            # Check for duplicates using ID
-            if not any(d['id'] == post['id'] for d in st.session_state.live_data):
-                if passes_filters(post):
-                    st.session_state.live_data.insert(0, {
-                        "id": post['id'],
-                        "time": datetime.now().strftime('%H:%M'),
-                        "title": post['title'],
-                        "link": post['url'],
-                        "tag": post['tag'],
-                        "age": post['age']
-                    })
-                    found_new += 1
-        
-        if found_new > 0:
-            st.success(f"Found {found_new} new matching posts!")
-        else:
-            st.info("No new matches found right now.")
-
-    # Display Live Feed
-    if st.session_state.live_data:
-        for item in st.session_state.live_data:
-            st.markdown(f"⏰ **{item['time']}** | **{item['tag']} {item['age']}** | [{item['title']}]({item['link']})")
+    st.write("Checks for new items every time you click.")
+    if st.button("Check Now"):
+        entries = fetch_rss()
+        count = 0
+        for entry in entries:
+            post = parse_entry(entry)
+            if passes_filters(post):
+                st.markdown(f"**{post['tag']} {post['age']}** | [{post['title']}]({post['link']})")
+                count += 1
+        if count == 0:
+            st.warning("No matches found.")
